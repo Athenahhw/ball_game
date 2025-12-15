@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>空中極限平衡 - 3D視角版</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #87CEEB; /* 天空藍 */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* 防止手機滑動刷新 */
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(to bottom, #87CEFA 0%, #E0F7FA 100%); /* 更柔和的天空 */
+        }
+
+        canvas {
+            /* 移除圓角，因為現在是寬闊的3D視野 */
+            /* border-radius: 50%; */ 
+            width: 100%;
+            height: 100%;
+        }
+
+        .ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none; /* 讓點擊穿透到 Canvas */
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .hud {
+            display: flex;
+            justify-content: space-between;
+            color: #333; /* 改深色字體以適應亮背景 */
+            font-weight: bold;
+            font-size: 1.5rem;
+            text-shadow: 1px 1px 0px rgba(255,255,255,0.8);
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 10;
+            pointer-events: auto;
+            backdrop-filter: blur(8px);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        button {
+            background: linear-gradient(45deg, #11998e, #38ef7d);
+            border: none;
+            padding: 15px 40px;
+            color: white;
+            font-size: 1.5rem;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            box-shadow: 0 5px 15px rgba(56, 239, 125, 0.4);
+            font-weight: bold;
+            margin-top: 20px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        button:active {
+            transform: scale(0.95);
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            margin-bottom: 10px;
+            text-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            text-align: center;
+            color: #fff;
+        }
+        
+        p {
+            font-size: 1.3rem;
+            max-width: 600px;
+            text-align: center;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            color: #eee;
+        }
+
+        /* 虛擬搖桿樣式 */
+        #joystick-zone {
+            position: absolute;
+            bottom: 50px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 120px;
+            height: 120px;
+            background: rgba(0, 0, 0, 0.1);
+            border: 2px solid rgba(255, 255, 255, 0.5);
+            border-radius: 50%;
+            pointer-events: auto;
+            display: none; 
+        }
+        
+        #joystick-knob {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 40px;
+            height: 40px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        @media (max-width: 768px) {
+            #joystick-zone {
+                display: block;
+            }
+            h1 { font-size: 2rem; }
+            button { padding: 10px 30px; font-size: 1.2rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <canvas id="gameCanvas"></canvas>
+    
+    <!-- HUD -->
+    <div class="ui-layer">
+        <div class="hud">
+            <div id="level-display">關卡: 1</div>
+            <div id="time-display">時間: 30s</div>
+        </div>
+        <!-- 虛擬搖桿區域 -->
+        <div id="joystick-zone">
+            <div id="joystick-knob"></div>
+        </div>
+    </div>
+
+    <!-- 開始畫面 -->
+    <div id="start-screen" class="overlay">
+        <h1>空中極限平衡 3D</h1>
+        <p>立體視角挑戰！<br>利用 <b>方向鍵</b> 或 <b>虛擬搖桿</b> 控制。<br>注意：側面視角下，前後移動會有距離感差異！</p>
+        <button onclick="startGame()">開始挑戰</button>
+    </div>
+
+    <!-- 關卡成功畫面 -->
+    <div id="level-screen" class="overlay hidden">
+        <h1>關卡完成！</h1>
+        <p id="level-message">準備進入下一層挑戰...</p>
+        <button onclick="nextLevel()">下一關</button>
+    </div>
+
+    <!-- 遊戲結束畫面 -->
+    <div id="game-over-screen" class="overlay hidden">
+        <h1 style="color: #ff6b6b;">墜落！</h1>
+        <p>你失去了平衡掉進了雲海...</p>
+        <p id="final-score" class="text-xl text-yellow-300"></p>
+        <button onclick="restartGame()">重新挑戰</button>
+    </div>
+    
+    <!-- 通關畫面 -->
+    <div id="victory-screen" class="overlay hidden">
+        <h1 class="text-yellow-400">平衡大師！</h1>
+        <p>你征服了所有高空挑戰！</p>
+        <button onclick="restartGame()">再次遊玩</button>
+    </div>
+</div>
+
+<script>
+    // --- 遊戲設定與變數 ---
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // UI 元素
+    const startScreen = document.getElementById('start-screen');
+    const levelScreen = document.getElementById('level-screen');
+    const gameOverScreen = document.getElementById('game-over-screen');
+    const victoryScreen = document.getElementById('victory-screen');
+    const levelDisplay = document.getElementById('level-display');
+    const timeDisplay = document.getElementById('time-display');
+    const levelMessage = document.getElementById('level-message');
+
+    // 遊戲狀態
+    let gameState = 'MENU'; 
+    let animationId;
+    let lastTime = 0;
+    
+    // 視覺設定
+    const VIEW_SCALE_Y = 0.6; // Y軸壓縮比例 (0.6 = 傾斜約50度)
+    const PLATFORM_THICKNESS = 40; // 平台厚度
+    
+    // 關卡配置
+    const LEVELS = [
+        { 
+            duration: 15, 
+            platformRadius: 250, 
+            windForce: 0, 
+            name: "新手平台", 
+            desc: "適應立體視角，保持在圓心。",
+            spawnRate: 0,
+            obstacleSpeed: 0,
+            colorTheme: '#4facfe'
+        },
+        { 
+            duration: 20, 
+            platformRadius: 230, 
+            windForce: 0.2, 
+            name: "高空氣流", 
+            desc: "感受到風了嗎？",
+            spawnRate: 0,
+            obstacleSpeed: 0,
+            colorTheme: '#00f2fe'
+        },
+        { 
+            duration: 25, 
+            platformRadius: 200, 
+            windForce: 0.1, 
+            name: "落石警告", 
+            desc: "小心頭上！灰色石頭會將你彈飛。",
+            spawnRate: 2000, 
+            obstacleSpeed: 3,
+            type: 'falling',
+            colorTheme: '#f093fb'
+        },
+        { 
+            duration: 30, 
+            platformRadius: 180, 
+            windForce: 0.3, 
+            name: "金色追蹤者", 
+            desc: "金色球體會主動追擊！",
+            spawnRate: 1500,
+            obstacleSpeed: 4,
+            type: 'chaser',
+            colorTheme: '#f5576c'
+        },
+        { 
+            duration: 35, 
+            platformRadius: 160, 
+            windForce: 0.6, 
+            name: "極限暴風圈", 
+            desc: "平台極小，狂風暴雨，存活下來！",
+            spawnRate: 800,
+            obstacleSpeed: 5,
+            type: 'mixed',
+            colorTheme: '#434343'
+        }
+    ];
+
+    let currentLevelIndex = 0;
+    let levelTimeRemaining = 0;
+    let obstacleTimer = 0;
+
+    // 玩家與物件
+    const player = {
+        x: 0, y: 0, // 邏輯座標 (Top-down)
+        radius: 15,
+        color: '#FF512F',
+        speed: 0.5, 
+        maxSpeed: 6,
+        vx: 0, vy: 0,
+        friction: 0.92,
+        mass: 1
+    };
+
+    let obstacles = [];
+    let particles = [];
+    let clouds = [];
+    
+    // 平台動態位置
+    let platformCenter = { x: 0, y: 0 };
+
+    // 輸入控制
+    const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, w: false, s: false, a: false, d: false };
+    const joystick = { active: false, x: 0, y: 0 }; 
+
+    // --- 初始化與事件監聽 ---
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        platformCenter.x = canvas.width / 2;
+        platformCenter.y = canvas.height / 2;
+        
+        if(gameState === 'MENU') {
+            player.x = canvas.width / 2;
+            player.y = canvas.height / 2;
+        }
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    window.addEventListener('keydown', (e) => {
+        if(keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.key.toLowerCase())) {
+            keys[e.key] = true;
+            if(e.key === 'W' || e.key === 'w') keys.ArrowUp = true;
+            if(e.key === 'S' || e.key === 's') keys.ArrowDown = true;
+            if(e.key === 'A' || e.key === 'a') keys.ArrowLeft = true;
+            if(e.key === 'D' || e.key === 'd') keys.ArrowRight = true;
+        }
+    });
+
+    window.addEventListener('keyup', (e) => {
+        if(keys.hasOwnProperty(e.key) || keys.hasOwnProperty(e.key.toLowerCase())) {
+            keys[e.key] = false;
+            if(e.key === 'W' || e.key === 'w') keys.ArrowUp = false;
+            if(e.key === 'S' || e.key === 's') keys.ArrowDown = false;
+            if(e.key === 'A' || e.key === 'a') keys.ArrowLeft = false;
+            if(e.key === 'D' || e.key === 'd') keys.ArrowRight = false;
+        }
+    });
+
+    // 觸控搖桿邏輯
+    const joystickZone = document.getElementById('joystick-zone');
+    const joystickKnob = document.getElementById('joystick-knob');
+    let joystickTouchId = null;
+    let joystickCenter = { x: 0, y: 0 };
+    const joystickRadius = 60;
+
+    joystickZone.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        joystickTouchId = touch.identifier;
+        const rect = joystickZone.getBoundingClientRect();
+        joystickCenter = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        updateJoystick(touch.clientX, touch.clientY);
+    }, { passive: false });
+
+    joystickZone.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === joystickTouchId) {
+                updateJoystick(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+                break;
+            }
+        }
+    }, { passive: false });
+
+    const endJoystick = (e) => {
+        e.preventDefault();
+        for (let i = 0; i < e.changedTouches.length; i++) {
+            if (e.changedTouches[i].identifier === joystickTouchId) {
+                joystick.active = false;
+                joystick.x = 0;
+                joystick.y = 0;
+                joystickKnob.style.transform = `translate(-50%, -50%)`;
+                joystickTouchId = null;
+                break;
+            }
+        }
+    };
+    joystickZone.addEventListener('touchend', endJoystick);
+    joystickZone.addEventListener('touchcancel', endJoystick);
+
+    function updateJoystick(clientX, clientY) {
+        let dx = clientX - joystickCenter.x;
+        let dy = clientY - joystickCenter.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > joystickRadius) {
+            const angle = Math.atan2(dy, dx);
+            dx = Math.cos(angle) * joystickRadius;
+            dy = Math.sin(angle) * joystickRadius;
+        }
+
+        joystickKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+        
+        joystick.active = true;
+        joystick.x = dx / joystickRadius;
+        joystick.y = dy / joystickRadius;
+    }
+
+
+    // --- 遊戲邏輯 ---
+
+    function initClouds() {
+        clouds = [];
+        for(let i=0; i<15; i++) {
+            clouds.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height,
+                radius: 40 + Math.random() * 80,
+                speed: 0.1 + Math.random() * 0.4,
+                opacity: 0.2 + Math.random() * 0.3
+            });
+        }
+    }
+
+    function startGame() {
+        currentLevelIndex = 0;
+        startLevel();
+    }
+
+    function startLevel() {
+        const level = LEVELS[currentLevelIndex];
+        levelTimeRemaining = level.duration;
+        obstacleTimer = 0;
+        obstacles = [];
+        particles = [];
+        
+        // 重置玩家
+        player.x = canvas.width / 2;
+        player.y = canvas.height / 2;
+        player.vx = 0;
+        player.vy = 0;
+
+        gameState = 'PLAYING';
+        
+        levelDisplay.textContent = `關卡: ${currentLevelIndex + 1} - ${level.name}`;
+        startScreen.classList.add('hidden');
+        levelScreen.classList.add('hidden');
+        gameOverScreen.classList.add('hidden');
+        victoryScreen.classList.add('hidden');
+        
+        lastTime = performance.now();
+        if (!animationId) {
+            loop(lastTime);
+        }
+    }
+
+    function nextLevel() {
+        currentLevelIndex++;
+        if(currentLevelIndex >= LEVELS.length) {
+            gameState = 'VICTORY';
+            levelScreen.classList.add('hidden');
+            victoryScreen.classList.remove('hidden');
+        } else {
+            startLevel();
+        }
+    }
+
+    function restartGame() {
+        startGame();
+    }
+
+    function spawnObstacle(level) {
+        if (level.spawnRate === 0) return;
+
+        let type = level.type;
+        if (type === 'mixed') {
+            type = Math.random() > 0.5 ? 'falling' : 'chaser';
+        }
+
+        const angle = Math.random() * Math.PI * 2;
+        const dist = Math.max(canvas.width, canvas.height) / 1.5; 
+        
+        const obs = {
+            x: platformCenter.x + Math.cos(angle) * dist,
+            y: platformCenter.y + Math.sin(angle) * dist,
+            radius: 15 + Math.random() * 15,
+            color: type === 'chaser' ? '#FFD700' : '#8c9eff', // 金色追蹤，藍灰色落石
+            vx: 0,
+            vy: 0,
+            mass: 2 + Math.random(),
+            type: type
+        };
+
+        if (type === 'falling') {
+            const targetX = platformCenter.x + (Math.random() - 0.5) * level.platformRadius;
+            const targetY = platformCenter.y + (Math.random() - 0.5) * level.platformRadius;
+            const angleToTarget = Math.atan2(targetY - obs.y, targetX - obs.x);
+            const speed = level.obstacleSpeed * (0.8 + Math.random() * 0.4);
+            
+            obs.vx = Math.cos(angleToTarget) * speed;
+            obs.vy = Math.sin(angleToTarget) * speed;
+        } 
+        
+        obstacles.push(obs);
+    }
+
+    function createExplosion(x, y, color) {
+        for(let i=0; i<8; i++) {
+            particles.push({
+                x: x,
+                y: y,
+                vx: (Math.random() - 0.5) * 10,
+                vy: (Math.random() - 0.5) * 10,
+                life: 1.0,
+                color: color,
+                z: Math.random() * 20 // 粒子也有高度
+            });
+        }
+    }
+
+    function update(dt) {
+        if(gameState !== 'PLAYING') return;
+
+        const level = LEVELS[currentLevelIndex];
+        
+        // 平台晃動計算
+        const time = Date.now() / 1000;
+        const baseSwayAmount = 20 + currentLevelIndex * 5; 
+        const swayX = Math.sin(time * 0.7) * baseSwayAmount;
+        const swayY = Math.cos(time * 0.5) * (baseSwayAmount * 0.6);
+
+        let jitterX = 0;
+        let jitterY = 0;
+        if (level.windForce > 0.1) {
+            const shakeIntensity = level.windForce * 4;
+            jitterX = (Math.random() - 0.5) * shakeIntensity;
+            jitterY = (Math.random() - 0.5) * shakeIntensity;
+        }
+
+        platformCenter.x = (canvas.width / 2) + swayX + jitterX;
+        platformCenter.y = (canvas.height / 2) + swayY + jitterY;
+
+        const cx = platformCenter.x;
+        const cy = platformCenter.y;
+
+
+        // 時間
+        levelTimeRemaining -= dt / 1000;
+        timeDisplay.textContent = `時間: ${Math.ceil(levelTimeRemaining)}s`;
+
+        if (levelTimeRemaining <= 0) {
+            gameState = 'LEVEL_TRANSITION';
+            levelMessage.textContent = `${level.name} 完成！準備下一關...`;
+            levelScreen.classList.remove('hidden');
+            return;
+        }
+
+        // 障礙物生成
+        if (level.spawnRate > 0) {
+            obstacleTimer += dt;
+            if (obstacleTimer > level.spawnRate) {
+                spawnObstacle(level);
+                obstacleTimer = 0;
+            }
+        }
+
+        // 玩家物理
+        let inputX = 0;
+        let inputY = 0;
+
+        if (keys.ArrowUp) inputY -= 1;
+        if (keys.ArrowDown) inputY += 1;
+        if (keys.ArrowLeft) inputX -= 1;
+        if (keys.ArrowRight) inputX += 1;
+
+        if (joystick.active) {
+            inputX = joystick.x;
+            inputY = joystick.y;
+        }
+
+        const mag = Math.sqrt(inputX*inputX + inputY*inputY);
+        if (mag > 1) {
+            inputX /= mag;
+            inputY /= mag;
+        }
+
+        player.vx += inputX * player.speed;
+        player.vy += inputY * player.speed;
+
+        // 風力
+        if (level.windForce > 0) {
+            const time = Date.now() / 1000;
+            const windAngle = Math.sin(time) * Math.PI; 
+            player.vx += Math.cos(windAngle) * level.windForce;
+            player.vy += Math.sin(windAngle) * level.windForce;
+            
+            if (Math.random() < 0.1) {
+                particles.push({
+                    x: cx - Math.cos(windAngle) * 400 + (Math.random()-0.5)*200, 
+                    y: cy - Math.sin(windAngle) * 400 + (Math.random()-0.5)*200,
+                    vx: Math.cos(windAngle) * 10,
+                    vy: Math.sin(windAngle) * 10,
+                    life: 0.5,
+                    color: 'rgba(255, 255, 255, 0.5)',
+                    isWind: true
+                });
+            }
+        }
+
+        player.vx *= player.friction;
+        player.vy *= player.friction;
+
+        const speed = Math.sqrt(player.vx*player.vx + player.vy*player.vy);
+        if (speed > player.maxSpeed) {
+            player.vx = (player.vx / speed) * player.maxSpeed;
+            player.vy = (player.vy / speed) * player.maxSpeed;
+        }
+
+        player.x += player.vx;
+        player.y += player.vy;
+
+        // 掉落檢測 (邏輯上還是圓形，只是顯示上壓縮了)
+        // 這樣可以保證物理公平性
+        const distFromCenter = Math.sqrt((player.x - cx)**2 + (player.y - cy)**2);
+        if (distFromCenter > level.platformRadius + player.radius) {
+            gameState = 'GAME_OVER';
+            document.getElementById('final-score').textContent = `存活至: 第 ${currentLevelIndex + 1} 關`;
+            gameOverScreen.classList.remove('hidden');
+            createExplosion(player.x, player.y, player.color);
+        }
+
+        // 障礙物邏輯
+        obstacles.forEach((obs, index) => {
+            if (obs.type === 'chaser') {
+                const dx = player.x - obs.x;
+                const dy = player.y - obs.y;
+                const angle = Math.atan2(dy, dx);
+                obs.vx += Math.cos(angle) * 0.1;
+                obs.vy += Math.sin(angle) * 0.1;
+                
+                const obsSpeed = Math.sqrt(obs.vx*obs.vx + obs.vy*obs.vy);
+                const maxObsSpeed = level.obstacleSpeed;
+                if(obsSpeed > maxObsSpeed) {
+                    obs.vx = (obs.vx/obsSpeed) * maxObsSpeed;
+                    obs.vy = (obs.vy/obsSpeed) * maxObsSpeed;
+                }
+            }
+
+            obs.x += obs.vx;
+            obs.y += obs.vy;
+
+            // 碰撞
+            const dx = player.x - obs.x;
+            const dy = player.y - obs.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            
+            if (dist < player.radius + obs.radius) {
+                const angle = Math.atan2(dy, dx);
+                const force = 10; 
+                
+                player.vx += Math.cos(angle) * force;
+                player.vy += Math.sin(angle) * force;
+                
+                obs.vx -= Math.cos(angle) * force;
+                obs.vy -= Math.sin(angle) * force;
+
+                createExplosion((player.x+obs.x)/2, (player.y+obs.y)/2, '#FFF');
+            }
+
+            const distFromCenterObs = Math.sqrt((obs.x - cx)**2 + (obs.y - cy)**2);
+            if (obs.type === 'falling' && distFromCenterObs > canvas.width) {
+                obstacles.splice(index, 1);
+            }
+        });
+
+        // 雲朵
+        clouds.forEach(cloud => {
+            cloud.x -= cloud.speed;
+            if (cloud.x + cloud.radius < 0) {
+                cloud.x = canvas.width + cloud.radius;
+                cloud.y = Math.random() * canvas.height;
+            }
+        });
+
+        // 粒子
+        for(let i = particles.length - 1; i >= 0; i--) {
+            let p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= 0.05;
+            if(p.life <= 0) particles.splice(i, 1);
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const cx = platformCenter.x;
+        const cy = platformCenter.y;
+        const level = LEVELS[currentLevelIndex] || LEVELS[0];
+
+        // 1. 背景雲層 (最底層)
+        clouds.forEach(cloud => {
+            ctx.fillStyle = `rgba(255, 255, 255, ${cloud.opacity})`;
+            ctx.beginPath();
+            ctx.arc(cloud.x, cloud.y, cloud.radius, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // 2. 繪製 3D 平台 (核心邏輯改變)
+        
+        // 2.1 平台側面 (厚度)
+        // 漸層色模擬圓柱體光影
+        const sideGradient = ctx.createLinearGradient(cx - level.platformRadius, cy, cx + level.platformRadius, cy);
+        sideGradient.addColorStop(0, '#555');
+        sideGradient.addColorStop(0.5, '#999'); // 中間亮
+        sideGradient.addColorStop(1, '#555');
+        
+        ctx.fillStyle = sideGradient;
+        ctx.beginPath();
+        // 畫出下半部的橢圓 (底座)
+        ctx.ellipse(cx, cy + PLATFORM_THICKNESS, level.platformRadius, level.platformRadius * VIEW_SCALE_Y, 0, 0, Math.PI * 2);
+        // 畫出中間的矩形連接區
+        ctx.fillRect(cx - level.platformRadius, cy, level.platformRadius * 2, PLATFORM_THICKNESS);
+        ctx.fill();
+
+        // 2.2 平台表面 (頂部)
+        const surfaceGradient = ctx.createRadialGradient(cx, cy - level.platformRadius * 0.5, 10, cx, cy, level.platformRadius);
+        surfaceGradient.addColorStop(0, '#ffffff');
+        surfaceGradient.addColorStop(0.8, '#d0d0d0');
+        surfaceGradient.addColorStop(1, '#a0a0a0');
+        
+        ctx.fillStyle = surfaceGradient;
+        ctx.beginPath();
+        // 這是我們看到的「地面」，它是被壓扁的橢圓
+        ctx.ellipse(cx, cy, level.platformRadius, level.platformRadius * VIEW_SCALE_Y, 0, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // 平台邊框
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        // 2.3 平台網格 (透視效果)
+        ctx.save();
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, level.platformRadius, level.platformRadius * VIEW_SCALE_Y, 0, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+        ctx.lineWidth = 1;
+        
+        // 繪製網格
+        const gridSize = 40;
+        // X軸向線 (看起來是直的，但在平台移動時跟著動)
+        // 為了讓網格跟著平台「轉」，我們用簡單的位移模擬
+        const offsetX = cx % gridSize;
+        const offsetY = cy % gridSize;
+        
+        for(let i = -canvas.width; i < canvas.width; i+=gridSize) {
+             ctx.beginPath(); 
+             // 垂直線
+             ctx.moveTo(i + offsetX, cy - level.platformRadius); 
+             ctx.lineTo(i + offsetX, cy + level.platformRadius + PLATFORM_THICKNESS); 
+             ctx.stroke();
+             
+             // 水平線 (受視角壓縮)
+             ctx.beginPath(); 
+             const yPos = (i + offsetY) * VIEW_SCALE_Y; // 壓縮Y
+             // 這裡簡化處理，直接畫橫線
+             ctx.moveTo(cx - level.platformRadius, cy + (i % (level.platformRadius*2)) * VIEW_SCALE_Y); 
+             ctx.lineTo(cx + level.platformRadius, cy + (i % (level.platformRadius*2)) * VIEW_SCALE_Y);
+             ctx.stroke();
+        }
+        ctx.restore();
+
+
+        if (gameState === 'PLAYING' || gameState === 'LEVEL_TRANSITION') {
+            
+            // 3. 實體渲染 (深度排序)
+            // 將所有會動的東西放入列表，根據它們的 Y 座標排序
+            let renderList = [];
+            
+            // 加入玩家
+            renderList.push({ type: 'player', obj: player });
+            // 加入障礙物
+            obstacles.forEach(obs => renderList.push({ type: 'obstacle', obj: obs }));
+
+            // 根據 Y 軸排序 (Y越大代表越靠近螢幕下方，應該越晚畫，蓋住後面的)
+            renderList.sort((a, b) => a.obj.y - b.obj.y);
+
+            renderList.forEach(item => {
+                const obj = item.obj;
+                
+                // --- 投影計算 ---
+                // 我們需要算出物件在螢幕上的實際繪製位置
+                // X 軸不變
+                // Y 軸相對於平台中心進行壓縮
+                const relativeY = obj.y - cy;
+                const screenX = obj.x; // 簡單起見，X跟隨世界座標 (因為平台已經對齊了中心)
+                // 修正：其實世界座標已經是絕對座標，但我們視覺上要以平台中心為基準壓扁 Y
+                // 這樣才能保證「在平台邊緣」視覺上也是在橢圓邊緣
+                
+                // 正確的投影邏輯：
+                // 假設 obj.x, obj.y 是以 (0,0) 為左上角的絕對座標
+                // 我們要先算出它相對於平台中心的偏移量
+                const dx = obj.x - cx;
+                const dy = obj.y - cy;
+                
+                // 然後將 dy 壓縮，加上 cy 得到螢幕 Y
+                const drawX = cx + dx;
+                const drawY = cy + dy * VIEW_SCALE_Y;
+
+                // 3.1 影子 (畫在腳下)
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                // 影子也是壓扁的橢圓
+                ctx.ellipse(drawX, drawY, obj.radius, obj.radius * VIEW_SCALE_Y, 0, 0, Math.PI*2);
+                ctx.fill();
+
+                // 3.2 實體 (球體)
+                // 為了讓它看起來有「高度」，球心要畫在影子的上方
+                // 球體在透視中依然看起來是圓形
+                const sphereCenterY = drawY - obj.radius; 
+
+                ctx.beginPath();
+                ctx.arc(drawX, sphereCenterY, obj.radius, 0, Math.PI * 2);
+                ctx.fillStyle = obj.color;
+                ctx.fill();
+                
+                // 球體光澤 (模擬右上角光源)
+                const grad = ctx.createRadialGradient(drawX - obj.radius/3, sphereCenterY - obj.radius/3, 2, drawX, sphereCenterY, obj.radius);
+                grad.addColorStop(0, 'rgba(255,255,255,0.9)');
+                grad.addColorStop(0.5, 'rgba(255,255,255,0)');
+                ctx.fillStyle = grad;
+                ctx.fill();
+                
+                // 邊框
+                ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                // 3.3 玩家特徵 (眼睛)
+                if (item.type === 'player') {
+                    const eyeY = sphereCenterY - 3;
+                    const eyeXOffset = 5;
+                    // 根據速度移動眼珠
+                    const lookX = player.vx * 1.5;
+                    const lookY = player.vy * 1.5;
+
+                    ctx.fillStyle = 'white';
+                    ctx.beginPath(); ctx.arc(drawX - eyeXOffset, eyeY, 5, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(drawX + eyeXOffset, eyeY, 5, 0, Math.PI * 2); ctx.fill();
+                    
+                    ctx.fillStyle = 'black';
+                    ctx.beginPath(); ctx.arc(drawX - eyeXOffset + lookX, eyeY + lookY, 2.5, 0, Math.PI * 2); ctx.fill();
+                    ctx.beginPath(); ctx.arc(drawX + eyeXOffset + lookX, eyeY + lookY, 2.5, 0, Math.PI * 2); ctx.fill();
+                }
+            });
+
+            // 4. 粒子效果 (投影)
+            particles.forEach(p => {
+                const pdx = p.x - cx;
+                const pdy = p.y - cy;
+                const pDrawX = cx + pdx;
+                const pDrawY = cy + pdy * VIEW_SCALE_Y - (p.z || 0); // 考慮粒子高度
+
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                if (p.isWind) {
+                    ctx.fillRect(pDrawX, pDrawY, 20, 2);
+                } else {
+                    ctx.beginPath();
+                    ctx.arc(pDrawX, pDrawY, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+                ctx.globalAlpha = 1.0;
+            });
+        }
+    }
+
+    function loop(timestamp) {
+        const dt = timestamp - lastTime;
+        lastTime = timestamp;
+
+        update(dt);
+        draw();
+
+        animationId = requestAnimationFrame(loop);
+    }
+
+    // 啟動環境
+    initClouds();
+    resize();
+    loop(0); 
+
+</script>
+</body>
+</html>
